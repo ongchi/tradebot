@@ -1,0 +1,30 @@
+[package]
+name = "tradebot"
+version = "0.1.0"
+authors = ["chii"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+clap = "3.0.0-beta.2"
+config = "0.11"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+log = "0.4.0"
+env_logger = "0.8.2"
+futures = "0.3"
+r2d2 = "0.8"
+r2d2_sqlite = "0.18.0"
+reqwest = { version = "0.10", features = ["blocking"] }
+ring = "0.16"
+rust-embed="5.9.0"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+rusqlite = { version = "0.25", features = ['array', 'bundled', 'chrono'] }
+tokio = { version = "1", features = ["full"] }
+warp = "0.3"
+mime_guess = "2"
+
+[dev-dependencies]
+serde_test = "1.0"
+#bitfinex = { path = "../bitfinex-rs" }
