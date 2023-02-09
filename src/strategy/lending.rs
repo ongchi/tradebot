@@ -1,6 +1,5 @@
 use crate::db::{DbConn, DbPool};
 use anyhow::{anyhow, Result};
-use chrono::prelude::*;
 use chrono::{DateTime, Duration, Utc};
 use log::{debug, error, info};
 use rusqlite::params;
@@ -77,15 +76,9 @@ pub struct Strategy {
     last_tick: DateTime<Utc>,
 }
 
-fn current_minute() -> DateTime<Utc> {
-    let now = Utc::now();
-    Utc.ymd(now.year(), now.month(), now.day())
-        .and_hms(now.hour(), now.minute(), 0)
-}
-
 impl Strategy {
     pub fn new(client: Arc<crate::exchange::ApiClient>, db_pool: DbPool, config: Config) -> Self {
-        let now = current_minute();
+        let now = Utc::now();
         let last_tick = now - Duration::minutes(1);
         let client = match client.as_ref() {
             crate::exchange::ApiClient::Cex(_) => unimplemented!(),
@@ -108,13 +101,7 @@ impl Strategy {
             self.db_connection.execute(
                 "INSERT INTO trades (symbol, mts, amount, rate, period)
     VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    format!("f{}", symbol),
-                    &h.mts,
-                    &h.amount,
-                    &h.rate,
-                    &h.period
-                ],
+                params![format!("f{symbol}"), &h.mts, &h.amount, &h.rate, &h.period],
             )?;
         }
 
@@ -171,7 +158,7 @@ impl Strategy {
             "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
             FROM trades
             WHERE symbol = ?1 AND DATETIME(mts) > DATETIME('now', '-3 hours')",
-            params![format!("f{}", symbol)],
+            params![format!("f{symbol}")],
             |row| row.get(0),
         ) {
             Ok(rate) => Ok(rate),
@@ -180,7 +167,7 @@ impl Strategy {
                     "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
                     FROM trades
                     WHERE symbol = ?1 ORDER BY DATETIME(mts) DESC LIMIT 100",
-                    params![format!("f{}", symbol)],
+                    params![format!("f{symbol}")],
                     |row| row.get(0),
                 ) {
                     Ok(rate) => Ok(rate),
@@ -308,7 +295,7 @@ impl super::Strategy for Strategy {
     fn exec(&mut self) -> Result<()> {
         if self.log_history(self.last_tick, self.now).is_ok() {
             self.last_tick = self.now;
-            self.now = self.now + Duration::minutes(1);
+            self.now += Duration::minutes(1);
         } else {
             error!("History fetch error");
         };

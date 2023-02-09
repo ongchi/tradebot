@@ -3,7 +3,6 @@ use clap::Parser;
 use tradebot::config;
 use tradebot::db::{get_pool, DbPool};
 use tradebot::exchange;
-use tradebot::web;
 
 #[derive(Parser)]
 #[clap(version = "0.1")]
@@ -23,10 +22,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db_pool = get_pool(conf.database.clone())?;
 
-    futures::join!(
-        web::run_webserver(conf.webserver.clone()),
-        run_tradebot(conf.exchanges.clone(), db_pool)
-    );
+    run_tradebot(conf.exchanges.clone(), db_pool).await;
 
     Ok(())
 }

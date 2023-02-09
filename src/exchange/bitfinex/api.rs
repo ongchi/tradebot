@@ -149,7 +149,7 @@ impl Client {
         end: DateTime<Utc>,
     ) -> Result<Vec<Trade>> {
         self.get(
-            &format!("v2/trades/{}/hist", symbol),
+            &format!("v2/trades/{symbol}/hist"),
             &[
                 ("start", format!("{}", start.timestamp() * 1000)),
                 ("end", format!("{}", end.timestamp() * 1000)),
@@ -158,11 +158,11 @@ impl Client {
     }
 
     pub fn books(&self, symbol: &str) -> Result<Vec<Book>> {
-        self.get(&format!("v2/book/{}/P3", symbol), &[()])
+        self.get(&format!("v2/book/{symbol}/P3"), &[()])
     }
 
     pub fn funding_info(&self, symbol: &str) -> Result<FundingInfo> {
-        self.post(&format!("v2/auth/r/info/funding/{}", symbol), json!({}))
+        self.post(&format!("v2/auth/r/info/funding/{symbol}"), json!({}))
     }
 
     //
@@ -181,7 +181,7 @@ impl Client {
     }
 
     pub fn active_funding_offers(&self, symbol: &str) -> Result<Vec<FundingOffer>> {
-        self.post(&format!("v2/auth/r/funding/offers/{}", symbol), json!({}))
+        self.post(&format!("v2/auth/r/funding/offers/{symbol}"), json!({}))
     }
 
     pub fn submit_funding_offer(
@@ -208,12 +208,12 @@ impl Client {
     }
 
     pub fn funding_credits(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
-        self.post(&format!("v2/auth/r/funding/credits/{}", symbol), json!({}))
+        self.post(&format!("v2/auth/r/funding/credits/{symbol}"), json!({}))
     }
 
     pub fn funding_credit_history(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
         self.post(
-            &format!("v2/auth/r/funding/credits/{}/hist", symbol),
+            &format!("v2/auth/r/funding/credits/{symbol}/hist"),
             json!({}),
         )
     }
@@ -223,7 +223,7 @@ impl Client {
         P: Serialize + ?Sized,
         R: DeserializeOwned,
     {
-        let url = format!("{}{}", API_HOST, path);
+        let url = format!("{API_HOST}{path}");
         let response = self.client.get(&url).query(params).send()?;
 
         self.response_body(response)
@@ -233,13 +233,13 @@ impl Client {
     where
         R: DeserializeOwned,
     {
-        let url = format!("{}{}", API_HOST, path);
+        let url = format!("{API_HOST}{path}");
         let nonce =
             (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() * 1000 + 524287).to_string();
         let sig = {
             let mut mac =
                 Hmac::<Sha384>::new_from_slice(self.api_secret.expose_secret().as_bytes())?;
-            mac.update(format!("/api/{}{}{}", path, nonce, payload).as_bytes());
+            mac.update(format!("/api/{path}{nonce}{payload}").as_bytes());
             encode(mac.finalize().into_bytes())
         };
 
