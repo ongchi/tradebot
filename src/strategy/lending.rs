@@ -1,3 +1,4 @@
+use crate::db::{DbConn, DbPool};
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use chrono::{DateTime, Duration, Utc};
@@ -69,8 +70,8 @@ pub struct Config {
 
 #[derive(Debug)]
 pub struct Strategy {
-    cex: Arc<dyn Api>,
-    db_conn: super::DbConn,
+    client: Arc<dyn Api>,
+    db_connection: DbConn,
     config: Config,
     now: DateTime<Utc>,
     last_tick: DateTime<Utc>,
@@ -83,13 +84,17 @@ fn current_minute() -> DateTime<Utc> {
 }
 
 impl Strategy {
-    pub fn new(cex: Arc<dyn Api>, db_conn: super::DbConn, config: Config) -> Self {
+    pub fn new(client: Arc<crate::exchange::ApiClient>, db_pool: DbPool, config: Config) -> Self {
         let now = current_minute();
         let last_tick = now - Duration::minutes(1);
+        let client = match client.as_ref() {
+            crate::exchange::ApiClient::Cex(_) => unimplemented!(),
+            crate::exchange::ApiClient::Bitfinex(client) => client.clone(),
+        };
 
         Self {
-            cex,
-            db_conn,
+            client,
+            db_connection: db_pool.get().unwrap(),
             config,
             now,
             last_tick,
@@ -98,9 +103,9 @@ impl Strategy {
 
     pub fn log_history(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<()> {
         let symbol = self.config.symbol.as_str();
-        let history = self.cex.history(symbol, start, end)?;
+        let history = self.client.history(symbol, start, end)?;
         for h in &history {
-            self.db_conn.execute(
+            self.db_connection.execute(
                 "INSERT INTO trades (symbol, mts, amount, rate, period)
     VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
@@ -118,9 +123,9 @@ impl Strategy {
 
     pub fn log_credits(&self) -> Result<()> {
         let symbol = self.config.symbol.as_str();
-        let credits = self.cex.credit_history(symbol)?;
+        let credits = self.client.credit_history(symbol)?;
         for c in &credits {
-            self.db_conn.execute(
+            self.db_connection.execute(
                 "INSERT OR REPLACE INTO credits VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     &c.id,
@@ -140,9 +145,9 @@ impl Strategy {
 
     pub fn log_provided(&self) -> Result<()> {
         let symbol = self.config.symbol.as_str();
-        let credits = self.cex.credits(symbol)?;
+        let credits = self.client.credits(symbol)?;
         for c in &credits {
-            self.db_conn.execute(
+            self.db_connection.execute(
                 "INSERT OR REPLACE INTO provided VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     &c.id,
@@ -162,7 +167,7 @@ impl Strategy {
 
     fn get_rate(&self) -> Result<f64> {
         let symbol = self.config.symbol.as_str();
-        match self.db_conn.query_row(
+        match self.db_connection.query_row(
             "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
             FROM trades
             WHERE symbol = ?1 AND DATETIME(mts) > DATETIME('now', '-3 hours')",
@@ -171,7 +176,7 @@ impl Strategy {
         ) {
             Ok(rate) => Ok(rate),
             Err(_) => {
-                match self.db_conn.query_row(
+                match self.db_connection.query_row(
                     "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
                     FROM trades
                     WHERE symbol = ?1 ORDER BY DATETIME(mts) DESC LIMIT 100",
@@ -191,11 +196,11 @@ impl Strategy {
         // cancel offer if rate difference > 5% or creation time > 1 hours
         let rate = self.get_rate()?;
 
-        for offer in self.cex.active_offers(symbol)? {
+        for offer in self.client.active_offers(symbol)? {
             if (rate - offer.rate).abs() / rate > 0.05
                 && (self.last_tick - offer.mts_created) > Duration::hours(1)
             {
-                self.cex.cancel_offer(offer.id)?;
+                self.client.cancel_offer(offer.id)?;
             }
         }
 
@@ -208,7 +213,7 @@ impl Strategy {
         let rate = self.get_rate()?;
 
         let mut offer_pair: Vec<(f64, u32)> = self
-            .cex
+            .client
             .books(symbol)?
             .iter()
             .filter_map(|b| {
@@ -237,7 +242,7 @@ impl Strategy {
         let preserved_amoount = self.config.reserved_amount_1.unwrap_or(1000.0);
         let preserved_amoount_l2 = self.config.reserved_amount_1.unwrap_or(1500.0);
 
-        if let Ok(ba) = self.cex.balance(symbol) {
+        if let Ok(ba) = self.client.balance(symbol) {
             if ba >= lend_unit_amount {
                 let mut amount = (ba * 100.0).floor() / 100.0;
 
@@ -246,7 +251,7 @@ impl Strategy {
 
                 // sumit offer by calculated rate
                 if rate >= min_lend_rate || amount > preserved_amoount {
-                    self.cex
+                    self.client
                         .submit_offer(symbol, lend_unit_amount, rate, period)?;
                     amount -= lend_unit_amount;
                 }
@@ -261,14 +266,14 @@ impl Strategy {
                                 && period_lim >= b_period
                                 && b_rate >= min_lend_rate))
                     {
-                        self.cex
+                        self.client
                             .submit_offer(symbol, lend_unit_amount, b_rate, period_lim)?;
                         amount -= lend_unit_amount;
                     } else if amount > preserved_amoount_l2
                         && b_period <= 5
                         && b_rate >= min_lend_rate
                     {
-                        self.cex
+                        self.client
                             .submit_offer(symbol, lend_unit_amount, b_rate, b_period)?;
                         amount -= lend_unit_amount;
                     } else {
@@ -300,8 +305,8 @@ fn period_by_rate(rate: f64) -> u32 {
 }
 
 impl super::Strategy for Strategy {
-    fn run(&mut self) -> Result<()> {
-        if let Ok(_) = self.log_history(self.last_tick, self.now) {
+    fn exec(&mut self) -> Result<()> {
+        if self.log_history(self.last_tick, self.now).is_ok() {
             self.last_tick = self.now;
             self.now = self.now + Duration::minutes(1);
         } else {
@@ -312,7 +317,7 @@ impl super::Strategy for Strategy {
         self.log_credits()?;
         self.log_provided()?;
 
-        let info = self.cex.info(self.config.symbol.clone().as_str())?;
+        let info = self.client.info(self.config.symbol.clone().as_str())?;
         let rate = self.get_rate()?;
         info!(
             "{} => (rate, r_3h, dur) = ({:.4}, {:.4}, {:.0})",

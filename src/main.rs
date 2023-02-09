@@ -1,16 +1,11 @@
-use anyhow::Result;
-use clap::Clap;
-// use env_logger;
-use futures::join;
-// use log;
+use clap::Parser;
 
-mod config;
-mod db;
-mod exchange;
-mod strategy;
-mod web;
+use tradebot::config;
+use tradebot::db::{get_pool, DbPool};
+use tradebot::exchange;
+use tradebot::web;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "0.1")]
 struct Opts {
     #[clap(short, long, default_value = "config.toml")]
@@ -18,7 +13,7 @@ struct Opts {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let opts: Opts = Opts::parse();
@@ -26,12 +21,28 @@ async fn main() -> Result<()> {
 
     log::debug!("{:?}", conf);
 
-    let db_pool = db::get_pool(conf.database.clone())?;
+    let db_pool = get_pool(conf.database.clone())?;
 
-    join!(
+    futures::join!(
         web::run_webserver(conf.webserver.clone()),
-        strategy::run(conf.exchanges.clone(), db_pool)
+        run_tradebot(conf.exchanges.clone(), db_pool)
     );
 
     Ok(())
+}
+
+async fn run_tradebot(exchange_configs: Vec<exchange::Config>, db_pool: DbPool) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+    loop {
+        interval.tick().await;
+        for config in exchange_configs.iter() {
+            let db_pool = db_pool.clone();
+            let config = config.clone();
+            tokio::spawn(async move {
+                if let Err(error) = config.exec(db_pool).await {
+                    log::error!("{:?}", error);
+                };
+            });
+        }
+    }
 }

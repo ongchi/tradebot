@@ -1,4 +1,3 @@
-// use mime_guess;
 use rust_embed::RustEmbed;
 use std::net::SocketAddr;
 use warp::{http::header::HeaderValue, path::Tail, reply::Response, Filter, Rejection, Reply};
@@ -8,15 +7,12 @@ use warp::{http::header::HeaderValue, path::Tail, reply::Response, Filter, Rejec
 struct Asset;
 
 pub async fn run_webserver(address: Option<String>) {
-    match address {
-        Some(addr) => {
-            let index_html = warp::path::end().and_then(serve_index);
-            let dist = warp::path("dist").and(warp::path::tail()).and_then(serve);
-            let routes = index_html.or(dist);
-            let addr: SocketAddr = addr.parse().unwrap();
-            warp::serve(routes).run(addr).await;
-        }
-        None => {}
+    if let Some(addr) = address {
+        let index_html = warp::path::end().and_then(serve_index);
+        let dist = warp::path("dist").and(warp::path::tail()).and_then(serve);
+        let routes = index_html.or(dist);
+        let addr: SocketAddr = addr.parse().unwrap();
+        warp::serve(routes).run(addr).await;
     }
 }
 

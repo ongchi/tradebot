@@ -38,11 +38,11 @@ impl<'de> Visitor<'de> for BoolVisitor {
         self.visit_i64(v as i64)
     }
 
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
         E: Error,
     {
-        match v.as_str() {
+        match v {
             "false" => Ok(false),
             "true" => Ok(true),
             o => Err(Error::invalid_value(Unexpected::Other(o), &"false or true")),

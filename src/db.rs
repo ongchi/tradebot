@@ -10,7 +10,7 @@ pub fn get_pool(uri: Option<String>) -> Result<DbPool> {
     let manager = SqliteConnectionManager::file(uri.unwrap());
     let pool = r2d2::Pool::new(manager).unwrap();
 
-    let conn = pool.clone().get().unwrap();
+    let conn = pool.get().unwrap();
 
     rusqlite::vtab::array::load_module(&conn)?;
 

@@ -4,24 +4,21 @@ use chrono::{
     DateTime, Utc,
 };
 use hex::encode;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use hmac::{Hmac, Mac};
 use reqwest::{blocking::Response, StatusCode};
-use ring::hmac;
+use secrecy::ExposeSecret;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::convert::From;
-use std::sync::Arc;
+use sha2::Sha384;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::deserializer::{bool_from_val, bool_from_val_option};
-use super::Bitfinex;
-use crate::strategy::lending;
+use super::Client;
 
 static API_HOST: &str = "https://api.bitfinex.com/";
-static NO_PARAMS: [(); 0] = [];
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct Trade {
+pub struct Trade {
     pub id: u32,
     #[serde(with = "ts_milliseconds")]
     pub mts: DateTime<Utc>,
@@ -31,7 +28,7 @@ pub(super) struct Trade {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct Book {
+pub struct Book {
     pub rate: f64,
     pub period: u32,
     pub count: u32,
@@ -39,14 +36,14 @@ pub(super) struct Book {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct FundingInfo {
+pub struct FundingInfo {
     key: String,
     symbol: String,
     pub funding: InfoDetail,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct InfoDetail {
+pub struct InfoDetail {
     pub yield_loan: f64,
     pub yield_lend: f64,
     pub duration_loan: f64,
@@ -54,7 +51,7 @@ pub(super) struct InfoDetail {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct FundingOffer {
+pub struct FundingOffer {
     pub id: u32,
     pub symbol: String,
     #[serde(with = "ts_milliseconds")]
@@ -91,7 +88,7 @@ pub(super) struct FundingOffer {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct FundingOfferResponse {
+pub struct FundingOfferResponse {
     #[serde(with = "ts_milliseconds")]
     pub mts: DateTime<Utc>,
     pub funding_type: String,
@@ -105,7 +102,7 @@ pub(super) struct FundingOfferResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(super) struct FundingCredit {
+pub struct FundingCredit {
     pub id: u32,
     pub symbol: String,
     pub side: i8,
@@ -144,24 +141,15 @@ pub(super) struct FundingCredit {
     pub position_pair: String,
 }
 
-impl Bitfinex {
-    pub(crate) fn new(api_key: &str, api_secret: &str) -> Self {
-        Self {
-            api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
-            strategies: Arc::new(vec![]),
-            client: reqwest::blocking::Client::new(),
-        }
-    }
-
-    pub(super) fn trades(
+impl Client {
+    pub fn trades(
         &self,
         symbol: &str,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<Trade>> {
         self.get(
-            format!("v2/trades/{}/hist", symbol).as_str(),
+            &format!("v2/trades/{}/hist", symbol),
             &[
                 ("start", format!("{}", start.timestamp() * 1000)),
                 ("end", format!("{}", end.timestamp() * 1000)),
@@ -169,148 +157,108 @@ impl Bitfinex {
         )
     }
 
-    pub(super) fn books(&self, symbol: &str) -> Result<Vec<Book>> {
-        self.get(format!("v2/book/{}/P3", symbol).as_str(), &NO_PARAMS)
+    pub fn books(&self, symbol: &str) -> Result<Vec<Book>> {
+        self.get(&format!("v2/book/{}/P3", symbol), &[()])
     }
 
-    pub(super) fn funding_info(&self, symbol: &str) -> Result<FundingInfo> {
-        self.post_signed(
-            format!("v2/auth/r/info/funding/{}", symbol).as_str(),
-            "{}",
-            &NO_PARAMS,
-        )
+    pub fn funding_info(&self, symbol: &str) -> Result<FundingInfo> {
+        self.post(&format!("v2/auth/r/info/funding/{}", symbol), json!({}))
     }
 
     //
     // Funding
     //
-    pub(super) fn funding_balance_available(&self, symbol: &str) -> Result<f64> {
-        let payload = json!({
-            "symbol": symbol,
-            "type": "FUNDING",
-        })
-        .to_string();
-
-        let balance: Vec<f64> =
-            self.post_signed("v2/auth/calc/order/avail", payload.as_str(), &NO_PARAMS)?;
+    pub fn funding_balance_available(&self, symbol: &str) -> Result<f64> {
+        let balance: Vec<f64> = self.post(
+            "v2/auth/calc/order/avail",
+            json!({
+                "symbol": symbol,
+                "type": "FUNDING",
+            }),
+        )?;
 
         Ok(-balance.first().unwrap())
     }
 
-    pub(super) fn active_funding_offers(&self, symbol: &str) -> Result<Vec<FundingOffer>> {
-        self.post_signed(
-            format!("v2/auth/r/funding/offers/{}", symbol).as_str(),
-            "{}",
-            &NO_PARAMS,
-        )
+    pub fn active_funding_offers(&self, symbol: &str) -> Result<Vec<FundingOffer>> {
+        self.post(&format!("v2/auth/r/funding/offers/{}", symbol), json!({}))
     }
 
-    pub(super) fn submit_funding_offer(
+    pub fn submit_funding_offer(
         &self,
         symbol: &str,
         amount: f64,
         rate: f64,
         period: u32,
     ) -> Result<FundingOfferResponse> {
-        let payload = json!({
-            "type": "LIMIT",
-            "symbol": symbol,
-            "amount": amount.to_string(),
-            "rate": rate.to_string(),
-            "period": period,
-        })
-        .to_string();
-
-        self.post_signed(
+        self.post(
             "v2/auth/w/funding/offer/submit",
-            payload.as_str(),
-            &NO_PARAMS,
+            json!({
+                "type": "LIMIT",
+                "symbol": symbol,
+                "amount": amount.to_string(),
+                "rate": rate.to_string(),
+                "period": period,
+            }),
         )
     }
 
-    pub(super) fn cancel_funding_offer(&self, id: u32) -> Result<FundingOfferResponse> {
-        let payload = json!({ "id": id }).to_string();
+    pub fn cancel_funding_offer(&self, id: u32) -> Result<FundingOfferResponse> {
+        self.post("v2/auth/w/funding/offer/cancel", json!({ "id": id }))
+    }
 
-        self.post_signed(
-            "v2/auth/w/funding/offer/cancel",
-            payload.as_str(),
-            &NO_PARAMS,
+    pub fn funding_credits(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
+        self.post(&format!("v2/auth/r/funding/credits/{}", symbol), json!({}))
+    }
+
+    pub fn funding_credit_history(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
+        self.post(
+            &format!("v2/auth/r/funding/credits/{}/hist", symbol),
+            json!({}),
         )
     }
 
-    pub(super) fn funding_credits(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
-        self.post_signed(
-            format!("v2/auth/r/funding/credits/{}", symbol).as_str(),
-            "{}",
-            &NO_PARAMS,
-        )
-    }
-
-    pub(super) fn funding_credit_history(&self, symbol: &str) -> Result<Vec<FundingCredit>> {
-        self.post_signed(
-            format!("v2/auth/r/funding/credits/{}/hist", symbol).as_str(),
-            "{}",
-            &NO_PARAMS,
-        )
-    }
-
-    fn get<P, D>(&self, api_path: &str, params: &P) -> Result<D>
+    fn get<P, R>(&self, path: &str, params: &P) -> Result<R>
     where
-        P: Serialize,
-        D: DeserializeOwned,
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
     {
-        let url = format!("{}{}", API_HOST, api_path);
+        let url = format!("{}{}", API_HOST, path);
         let response = self.client.get(&url).query(params).send()?;
 
         self.response_body(response)
     }
 
-    fn post_signed<P, D>(&self, api_path: &str, payload: &str, params: &P) -> Result<D>
+    fn post<R>(&self, path: &str, payload: Value) -> Result<R>
     where
-        P: Serialize,
-        D: DeserializeOwned,
+        R: DeserializeOwned,
     {
-        let url = format!("{}{}", API_HOST, api_path);
-        let headers = self.build_headers(api_path, payload)?;
+        let url = format!("{}{}", API_HOST, path);
+        let nonce =
+            (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() * 1000 + 524287).to_string();
+        let sig = {
+            let mut mac =
+                Hmac::<Sha384>::new_from_slice(self.api_secret.expose_secret().as_bytes())?;
+            mac.update(format!("/api/{}{}{}", path, nonce, payload).as_bytes());
+            encode(mac.finalize().into_bytes())
+        };
+
         let response = self
             .client
             .post(&url)
-            .headers(headers)
-            .body(payload.to_string())
-            .query(params)
+            .header("Content-Type", "application/json")
+            .header("bfx-nonce", nonce)
+            .header("bfx-apikey", self.api_key.expose_secret())
+            .header("bfx-signature", sig)
+            .json(&payload)
             .send()?;
 
         self.response_body(response)
     }
 
-    fn build_headers(&self, api_path: &str, payload: &str) -> Result<HeaderMap> {
-        let nonce =
-            (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() * 1000 + 524287).to_string();
-        let signature: String = format!("/api/{}{}{}", api_path, nonce, payload);
-        let signed_key = hmac::Key::new(hmac::HMAC_SHA384, self.api_secret.as_bytes());
-        let sig = encode(hmac::sign(&signed_key, signature.as_bytes()).as_ref());
-
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            HeaderName::from_static("bfx-nonce"),
-            HeaderValue::from_str(nonce.as_str())?,
-        );
-        headers.insert(
-            HeaderName::from_static("bfx-apikey"),
-            HeaderValue::from_str(self.api_key.as_str())?,
-        );
-        headers.insert(
-            HeaderName::from_static("bfx-signature"),
-            HeaderValue::from_str(sig.as_str())?,
-        );
-
-        Ok(headers)
-    }
-
-    fn response_body<D>(&self, response: Response) -> Result<D>
+    fn response_body<R>(&self, response: Response) -> Result<R>
     where
-        D: DeserializeOwned,
+        R: DeserializeOwned,
     {
         match response.status() {
             StatusCode::OK => {
@@ -322,64 +270,6 @@ impl Bitfinex {
                 }
             }
             s => Err(anyhow!("{:?}", s)),
-        }
-    }
-}
-
-impl From<FundingOffer> for lending::Offer {
-    fn from(item: FundingOffer) -> Self {
-        Self {
-            id: item.id,
-            symbol: item.symbol,
-            rate: item.rate,
-            mts_created: item.mts_created,
-        }
-    }
-}
-
-impl From<Book> for lending::Book {
-    fn from(item: Book) -> Self {
-        Self {
-            amount: item.amount,
-            rate: item.rate,
-            period: item.period,
-        }
-    }
-}
-
-impl From<Trade> for lending::Trade {
-    fn from(item: Trade) -> Self {
-        Self {
-            mts: item.mts,
-            amount: item.amount,
-            rate: item.rate,
-            period: item.period,
-        }
-    }
-}
-
-impl From<FundingCredit> for lending::Credit {
-    fn from(item: FundingCredit) -> Self {
-        Self {
-            id: item.id,
-            symbol: item.symbol,
-            mts_create: item.mts_create,
-            mts_update: item.mts_update,
-            amount: item.amount,
-            rate: item.rate,
-            period: item.period,
-            mts_opening: item.mts_opening,
-            mts_last_payout: item.mts_last_payout,
-            position_pair: item.position_pair,
-        }
-    }
-}
-
-impl From<FundingInfo> for lending::Info {
-    fn from(item: FundingInfo) -> Self {
-        Self {
-            yield_lend: item.funding.yield_lend,
-            duration_lend: item.funding.duration_lend,
         }
     }
 }
