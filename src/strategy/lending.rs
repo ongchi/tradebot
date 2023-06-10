@@ -162,8 +162,13 @@ impl Strategy {
         let symbol = self.config.symbol.as_str();
         match self.db_connection.query_row(
             "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
-            FROM trades
-            WHERE symbol = ?1 AND DATETIME(mts) > DATETIME('now', '-3 hours')",
+            FROM (
+                SELECT rate
+                FROM trades
+                WHERE
+                    symbol = ?1 AND
+                    DATETIME(mts) > DATETIME('now', '-2 hours')
+            )",
             params![format!("f{symbol}")],
             |row| row.get(0),
         ) {
@@ -171,8 +176,13 @@ impl Strategy {
             Err(_) => {
                 match self.db_connection.query_row(
                     "SELECT MAX(rate) * 0.8 + AVG(rate) * 0.2
-                    FROM trades
-                    WHERE symbol = ?1 ORDER BY DATETIME(mts) DESC LIMIT 100",
+                    FROM (
+                        SELECT rate
+                        FROM trades
+                        WHERE symbol = ?1
+                        ORDER BY mts DESC
+                        LIMIT 100
+                    )",
                     params![format!("f{symbol}")],
                     |row| row.get(0),
                 ) {
