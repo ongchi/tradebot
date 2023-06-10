@@ -1,8 +1,6 @@
 use clap::Parser;
 
-use tradebot::config;
-use tradebot::db::{get_pool, DbPool};
-use tradebot::exchange;
+use tradebot::{config, TradeBot};
 
 #[derive(Parser)]
 #[clap(version = "0.1")]
@@ -20,25 +18,8 @@ async fn main() -> anyhow::Result<()> {
 
     log::debug!("{:?}", conf);
 
-    let db_pool = get_pool(conf.database.clone())?;
-
-    run_tradebot(conf.exchanges.clone(), db_pool).await;
+    let mut bot = TradeBot::new(conf)?;
+    bot.run().await;
 
     Ok(())
-}
-
-async fn run_tradebot(exchange_configs: Vec<exchange::Config>, db_pool: DbPool) {
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-    loop {
-        interval.tick().await;
-        for config in exchange_configs.iter() {
-            let db_pool = db_pool.clone();
-            let config = config.clone();
-            tokio::spawn(async move {
-                if let Err(error) = config.exec(db_pool).await {
-                    log::error!("{:?}", error);
-                };
-            });
-        }
-    }
 }
