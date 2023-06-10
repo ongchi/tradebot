@@ -34,9 +34,11 @@ impl TradeBot {
                 let config = cfg.clone();
                 tokio::spawn(async move {
                     if let Err(error) = config.exec(db_pool).await {
-                        log::error!("{:?}", error);
-                    };
-                });
+                        log::error!("execution error: {:?}", error);
+                    }
+                })
+                .await
+                .expect("task panic");
             }
         }
     }

@@ -13,8 +13,8 @@ struct Opts {
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let opts: Opts = Opts::parse();
-    let conf = config::Config::from_file(opts.config.as_str())?;
+    let cli_opts: Opts = Opts::parse();
+    let conf = config::Config::from_file(cli_opts.config.as_str())?;
 
     log::debug!("{:?}", conf);
 

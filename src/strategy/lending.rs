@@ -98,11 +98,13 @@ impl Strategy {
         let symbol = self.config.symbol.as_str();
         let history = self.client.history(symbol, start, end)?;
         for h in &history {
-            self.db_connection.execute(
-                "INSERT INTO trades (symbol, mts, amount, rate, period)
+            self.db_connection
+                .execute(
+                    "INSERT INTO trades (symbol, mts, amount, rate, period)
     VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![format!("f{symbol}"), &h.mts, &h.amount, &h.rate, &h.period],
-            )?;
+                    params![format!("f{symbol}"), &h.mts, &h.amount, &h.rate, &h.period],
+                )
+                .map_err(|err| anyhow!("failed to log history: {:?}", err))?;
         }
 
         Ok(())
@@ -112,19 +114,21 @@ impl Strategy {
         let symbol = self.config.symbol.as_str();
         let credits = self.client.credit_history(symbol)?;
         for c in &credits {
-            self.db_connection.execute(
-                "INSERT OR REPLACE INTO credits VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    &c.id,
-                    &c.symbol,
-                    &c.amount,
-                    &c.rate,
-                    &c.period,
-                    &c.mts_opening,
-                    &c.mts_last_payout,
-                    &c.position_pair
-                ],
-            )?;
+            self.db_connection
+                .execute(
+                    "INSERT OR REPLACE INTO credits VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        &c.id,
+                        &c.symbol,
+                        &c.amount,
+                        &c.rate,
+                        &c.period,
+                        &c.mts_opening,
+                        &c.mts_last_payout,
+                        &c.position_pair
+                    ],
+                )
+                .map_err(|err| anyhow!("failed to log credits: {:?}", err))?;
         }
 
         Ok(())
@@ -134,19 +138,21 @@ impl Strategy {
         let symbol = self.config.symbol.as_str();
         let credits = self.client.credits(symbol)?;
         for c in &credits {
-            self.db_connection.execute(
-                "INSERT OR REPLACE INTO provided VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    &c.id,
-                    &c.symbol,
-                    &c.mts_create,
-                    &c.mts_update,
-                    &c.amount,
-                    &c.rate,
-                    &c.period,
-                    &c.position_pair
-                ],
-            )?;
+            self.db_connection
+                .execute(
+                    "INSERT OR REPLACE INTO provided VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        &c.id,
+                        &c.symbol,
+                        &c.mts_create,
+                        &c.mts_update,
+                        &c.amount,
+                        &c.rate,
+                        &c.period,
+                        &c.position_pair
+                    ],
+                )
+                .map_err(|err| anyhow!("failed to log provided: {:?}", err))?;
         }
 
         Ok(())
@@ -171,7 +177,7 @@ impl Strategy {
                     |row| row.get(0),
                 ) {
                     Ok(rate) => Ok(rate),
-                    Err(e) => Err(anyhow!("{:?}", e)),
+                    Err(e) => Err(anyhow!("failed to get rate: {:?}", e)),
                 }
             }
         }
@@ -230,6 +236,7 @@ impl Strategy {
         let preserved_amoount_l2 = self.config.reserved_amount_1.unwrap_or(1500.0);
 
         if let Ok(ba) = self.client.balance(symbol) {
+            log::debug!("balance available: {}", ba);
             if ba >= lend_unit_amount {
                 let mut amount = (ba * 100.0).floor() / 100.0;
 

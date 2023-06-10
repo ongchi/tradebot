@@ -158,7 +158,7 @@ impl Client {
     }
 
     pub fn books(&self, symbol: &str) -> Result<Vec<Book>> {
-        self.get(&format!("v2/book/{symbol}/P3"), &[()])
+        self.get(&format!("v2/book/{symbol}/P3"), &[("", "")])
     }
 
     pub fn funding_info(&self, symbol: &str) -> Result<FundingInfo> {
@@ -260,16 +260,13 @@ impl Client {
     where
         R: DeserializeOwned,
     {
+        let url = response.url().clone();
         match response.status() {
-            StatusCode::OK => {
-                let body = response.text()?;
-
-                match serde_json::from_str(body.as_str()) {
-                    Ok(d) => Ok(d),
-                    Err(e) => Err(anyhow!("reason => {:?} body => {}", e, body)),
-                }
-            }
-            s => Err(anyhow!("{:?}", s)),
+            StatusCode::OK => match response.json::<R>() {
+                Ok(d) => Ok(d),
+                Err(e) => Err(anyhow!("[{}]: {}", url, e)),
+            },
+            s => Err(anyhow!("[{}]: {:?}", url, s)),
         }
     }
 }
