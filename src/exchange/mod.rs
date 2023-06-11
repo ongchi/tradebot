@@ -3,7 +3,7 @@ mod cex;
 
 use crate::db::DbPool;
 use crate::strategy::{self, lending, Strategy};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use secrecy::Secret;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -17,12 +17,12 @@ pub struct Params {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "name")]
-pub enum Config {
+pub enum Exchange {
     Cex(Params),
     Bitfinex(Params),
 }
 
-impl Config {
+impl Exchange {
     fn get_strategies(self) -> Vec<strategy::Config> {
         match self {
             Self::Cex(params) => params.strategies,
@@ -31,23 +31,23 @@ impl Config {
     }
 }
 
-pub enum ApiClient {
+pub enum ExchangeApiClient {
     Cex(Arc<cex::Client>),
     Bitfinex(Arc<bitfinex::Client>),
 }
 
-impl From<Config> for ApiClient {
-    fn from(config: Config) -> Self {
+impl From<Exchange> for ExchangeApiClient {
+    fn from(config: Exchange) -> Self {
         match config {
-            Config::Cex(params) => ApiClient::Cex(Arc::new(params.into())),
-            Config::Bitfinex(params) => ApiClient::Bitfinex(Arc::new(params.into())),
+            Exchange::Cex(params) => ExchangeApiClient::Cex(Arc::new(params.into())),
+            Exchange::Bitfinex(params) => ExchangeApiClient::Bitfinex(Arc::new(params.into())),
         }
     }
 }
 
-impl Config {
+impl Exchange {
     pub async fn exec(&self, db_pool: DbPool) -> Result<()> {
-        let client: Arc<ApiClient> = Arc::new(self.clone().into());
+        let client: Arc<ExchangeApiClient> = Arc::new(self.clone().into());
         let strategy_configs = self.clone().get_strategies();
 
         for config in strategy_configs {
@@ -55,7 +55,9 @@ impl Config {
             let db_pool = db_pool.clone();
             match config {
                 strategy::Config::Lending(config) => {
-                    lending::Strategy::new(client, db_pool, config).exec()?
+                    lending::Strategy::new(client, db_pool, config)
+                        .exec()
+                        .map_err(|e| anyhow!("[{:?}]: {:?}", self, e))?
                 }
             };
         }

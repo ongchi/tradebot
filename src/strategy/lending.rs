@@ -77,12 +77,16 @@ pub struct Strategy {
 }
 
 impl Strategy {
-    pub fn new(client: Arc<crate::exchange::ApiClient>, db_pool: DbPool, config: Config) -> Self {
+    pub fn new(
+        client: Arc<crate::exchange::ExchangeApiClient>,
+        db_pool: DbPool,
+        config: Config,
+    ) -> Self {
         let now = Utc::now();
         let last_tick = now - Duration::minutes(1);
         let client = match client.as_ref() {
-            crate::exchange::ApiClient::Cex(_) => unimplemented!(),
-            crate::exchange::ApiClient::Bitfinex(client) => client.clone(),
+            crate::exchange::ExchangeApiClient::Cex(_) => unimplemented!(),
+            crate::exchange::ExchangeApiClient::Bitfinex(client) => client.clone(),
         };
 
         Self {
@@ -167,7 +171,7 @@ impl Strategy {
                 FROM trades
                 WHERE
                     symbol = ?1 AND
-                    DATETIME(mts) > DATETIME('now', '-2 hours')
+                    DATETIME(mts) > DATETIME('now', '-12 hours')
             )",
             params![format!("f{symbol}")],
             |row| row.get(0),

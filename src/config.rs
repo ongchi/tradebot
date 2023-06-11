@@ -2,12 +2,12 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::exchange;
+use crate::exchange::Exchange;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub database: Option<String>,
-    pub exchanges: Vec<exchange::Config>,
+    pub exchanges: Vec<Exchange>,
 }
 
 impl Config {

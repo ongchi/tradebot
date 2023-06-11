@@ -224,7 +224,7 @@ impl Client {
         R: DeserializeOwned,
     {
         let url = format!("{API_HOST}{path}");
-        let response = self.client.get(&url).query(params).send()?;
+        let response = self.client.get(url).query(params).send()?;
 
         self.response_body(response)
     }
@@ -245,7 +245,7 @@ impl Client {
 
         let response = self
             .client
-            .post(&url)
+            .post(url)
             .header("Content-Type", "application/json")
             .header("bfx-nonce", nonce)
             .header("bfx-apikey", self.api_key.expose_secret())
