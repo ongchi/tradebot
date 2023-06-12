@@ -51,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     sched.start().await?;
-    tokio::time::sleep(core::time::Duration::from_secs(100)).await;
 
-    Ok(())
+    loop {
+        tokio::time::sleep(core::time::Duration::from_secs(600)).await;
+    }
 }

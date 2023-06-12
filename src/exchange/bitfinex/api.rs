@@ -234,8 +234,8 @@ impl Client {
         R: DeserializeOwned,
     {
         let url = format!("{API_HOST}{path}");
-        let nonce =
-            (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() * 1000 + 524287).to_string();
+        let nonce = (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() * 1000000 + 524287)
+            .to_string();
         let sig = {
             let mut mac =
                 Hmac::<Sha384>::new_from_slice(self.api_secret.expose_secret().as_bytes())?;
@@ -246,6 +246,7 @@ impl Client {
         let response = self
             .client
             .post(url)
+            .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .header("bfx-nonce", nonce)
             .header("bfx-apikey", self.api_key.expose_secret())
@@ -266,7 +267,13 @@ impl Client {
                 Ok(d) => Ok(d),
                 Err(e) => Err(anyhow!("[{}]: {}", url, e)),
             },
-            s => Err(anyhow!("[{}]: {:?}", url, s)),
+            s => {
+                if let Ok(message) = response.text() {
+                    Err(anyhow!("[{}] {}: {:?}", url, s, message))
+                } else {
+                    Err(anyhow!("[{}]: {:?}", url, s))
+                }
+            }
         }
     }
 }
