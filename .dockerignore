@@ -1,4 +1,3 @@
-cross_build
 target
 config.toml
 db.db3
