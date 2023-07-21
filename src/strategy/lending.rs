@@ -1,7 +1,7 @@
 use crate::db::{DbConn, DbPool};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Duration, Utc};
-use log::{debug, error, info};
+use log::{debug, info};
 use rusqlite::params;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -314,12 +314,15 @@ fn period_by_rate(rate: f64) -> u32 {
 
 impl super::Strategy for Strategy {
     fn exec(&mut self) -> Result<()> {
-        if self.log_history(self.last_tick, self.now).is_ok() {
-            self.last_tick = self.now;
-            self.now += Duration::minutes(1);
-        } else {
-            error!("History fetch error");
-        };
+        match self.log_history(self.last_tick, self.now) {
+            Ok(_) => {
+                self.last_tick = self.now;
+                self.now += Duration::minutes(1);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
 
         self.submit_offer()?;
         self.log_credits()?;
